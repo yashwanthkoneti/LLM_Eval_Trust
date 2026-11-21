@@ -1,4 +1,4 @@
-# policy-audit
+# eval-audit
 
 Two-stage LLM audit of a policy-retrieval assistant.
 
