@@ -214,3 +214,58 @@ def test_unconditional_single_row_table_is_not_a_conditional_axis():
            "|Fee|Amount|\n|---|---|\n|Annual|USD 100|")
     ont = build_ontology(parse_chunks(raw))
     assert ont.alternative_count == 0
+
+
+# --------------------------------------------------------------------------
+# table forms beyond the plain pipe case
+# --------------------------------------------------------------------------
+def test_blank_line_inside_a_table_does_not_end_it():
+    """It used to split the header off the body, losing every binding."""
+    from policy_audit.parsing.tables import split_segments
+    tables = [p for k, p in split_segments(
+        "|Band|Approver|\n|---|---|\n\n|up to 10k|Manager|") if k == "table"]
+    assert tables
+    assert "Approver=Manager" in tables[0].as_rows()[0]
+
+
+def test_tab_separated_rows_parse():
+    from policy_audit.parsing.tables import split_segments
+    tables = [p for k, p in split_segments(
+        "Band\tApprover\nup to 10k\tManager\nabove 10k\tDivision Head")
+        if k == "table"]
+    assert tables
+    assert tables[0].header == ("Band", "Approver")
+    assert "Approver=Division Head" in tables[0].as_rows()[1]
+
+
+def test_unparseable_table_is_flagged_not_silently_dropped():
+    """The judge must know a table resisted structuring."""
+    html = parse_chunks("**__DOCUMENT_TITLE__:**P**__TEXT__:**"
+                        "<table><tr><th>Band</th></tr>"
+                        "<tr><td>10k</td></tr></table>")[0]
+    spaced = parse_chunks("**__DOCUMENT_TITLE__:**P**__TEXT__:**"
+                          "Band           Approver\n"
+                          "up to 10k      Manager\n"
+                          "above 10k      Division Head")[0]
+    assert html.has_unstructured_table
+    assert spaced.has_unstructured_table
+
+
+def test_prose_and_parsed_tables_are_not_flagged():
+    prose = parse_chunks("**__DOCUMENT_TITLE__:**P**__TEXT__:**The approver "
+                         "is your line manager below the threshold.")[0]
+    piped = parse_chunks("**__DOCUMENT_TITLE__:**P**__TEXT__:**"
+                         "|Band|Approver|\n|---|---|\n|10k|Mgr|")[0]
+    assert not prose.has_unstructured_table
+    assert not piped.has_unstructured_table
+
+
+def test_ontology_still_finds_the_axis_without_the_prose_scan():
+    """The table says it; the prose scan was paying 1.5ms to agree."""
+    ont = build_ontology(parse_chunks(
+        "**__DOCUMENT_TITLE__:**Approval**__TEXT__:**"
+        + "Narrative that mentions region and entity at length. " * 50
+        + "\n|Band|Approver|\n|---|---|\n|up to 10k|Manager|\n"
+          "|above 10k|Division Head|"))
+    assert ont.conditional_dimensions == ("Band",)
+    assert ont.alternative_count == 2
