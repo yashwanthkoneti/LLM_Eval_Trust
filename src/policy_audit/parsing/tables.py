@@ -22,6 +22,17 @@ from typing import List, Sequence, Tuple
 from ..domain.models import Table
 
 PIPE_ROW = re.compile(r"^\s*\|.*\|\s*$")
+# a tab-delimited row with at least two columns. Cheap to support and it
+# is what a copy out of a spreadsheet produces.
+TAB_ROW = re.compile(r"^[^\t\n]*\t[^\t\n]*(?:\t|$)")
+# A table shape this parser cannot structure: HTML, or space-aligned
+# columns. It still reaches the judge as prose - which is the right
+# fallback, since reading it unaided beats not seeing it - but the judge
+# is told so, because an unstructured table is where a misread hides.
+UNSTRUCTURED_TABLE = re.compile(
+    r"<\s*table\b|<\s*t[rdh]\b"                    # html
+    r"|^[^\n|\t]{2,30}\s{3,}[^\n|\t]{2,30}\s*$",   # space aligned
+    re.I | re.M)
 # |---|:--:|---| and friends: separator chars only, and at least one dash
 _SEP_ROW = re.compile(r"^[\s|:-]*-[\s|:-]*$")
 _ESCAPED = "\x00"
@@ -31,12 +42,20 @@ def is_pipe_row(line: str) -> bool:
     return bool(PIPE_ROW.match(line))
 
 
+def is_table_row(line: str) -> bool:
+    """A pipe row, or a tab-delimited one."""
+    return bool(PIPE_ROW.match(line)) or bool(TAB_ROW.match(line))
+
+
 def split_row(line: str) -> List[str]:
     """One pipe row -> cells, position preserved.
 
     An escaped `\\|` inside a cell is data, not a boundary.
     """
-    s = str(line).strip().replace(r"\|", _ESCAPED)
+    raw = str(line)
+    if "|" not in raw and "\t" in raw:
+        return [c.strip() for c in raw.rstrip("\n").split("\t")]
+    s = raw.strip().replace(r"\|", _ESCAPED)
     if s.startswith("|"):
         s = s[1:]
     if s.endswith("|"):
@@ -88,15 +107,24 @@ def split_segments(value: str) -> List[Tuple[str, object]]:
             segs.append(("text", s))
         buf.clear()
 
-    for line in str(value).split("\n"):
-        if is_pipe_row(line):
+    lines = str(value).split("\n")
+    for i, line in enumerate(lines):
+        if is_table_row(line):
             if buf:
                 flush_text()
             run.append(line)
-        else:
-            if run:
-                flush_table()
-            buf.append(line)
+            continue
+        # A blank line inside a table does not end it. Treating it as a
+        # boundary split the header off the body, and a header alone is
+        # not a table, so the whole thing fell through to prose and the
+        # judge lost the column bindings.
+        if run and not line.strip():
+            nxt = next((l for l in lines[i + 1:] if l.strip()), "")
+            if is_table_row(nxt):
+                continue
+        if run:
+            flush_table()
+        buf.append(line)
     if run:
         flush_table()
     flush_text()
@@ -110,3 +138,23 @@ def render_table(table: Table) -> str:
              "  (a value belongs ONLY to the row it is printed under)"]
     lines.extend("  " + r for r in table.as_rows())
     return "\n".join(lines)
+
+
+def looks_like_unstructured_table(text: str) -> bool:
+    """A table we could not parse, so the judge should read it carefully.
+
+    Two space-aligned-looking lines in a row, or any HTML table markup.
+    One such line is a coincidence; two is a layout.
+    """
+    body = str(text or "")
+    if re.search(r"<\s*table\b|<\s*t[rdh]\b", body, re.I):
+        return True
+    runs = 0
+    for line in body.split("\n"):
+        if re.match(r"^[^\n|\t]{2,30}\s{3,}[^\n|\t]{2,30}\s*$", line):
+            runs += 1
+            if runs >= 2:
+                return True
+        else:
+            runs = 0
+    return False
