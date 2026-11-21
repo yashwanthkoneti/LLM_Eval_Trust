@@ -53,6 +53,10 @@ class Chunk:
     fields: Tuple[Tuple[str, str], ...]      # ordered key/value pairs
     tables: Tuple[Table, ...]
     text: str                                 # rendered, tables expanded
+    # a table shape the parser could not structure (HTML, space-aligned).
+    # It still reaches the judge as prose, but flagged, because an
+    # unstructured table is exactly where a misread hides.
+    has_unstructured_table: bool = False
 
     def field(self, *names: str) -> str:
         low = {k.lower(): v for k, v in self.fields}
