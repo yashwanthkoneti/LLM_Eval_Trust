@@ -86,7 +86,12 @@ def _sources(ix: Interaction, *, include_chunks: bool = True,
     if include_chunks:
         if ix.chunks:
             body = "\n\n".join(
-                f"[chunk {c.index} | {c.doc_title}]\n{c.text}"
+                f"[chunk {c.index} | {c.doc_title}]"
+                + ("\n(NOTE: this chunk appears to contain a table that "
+                   "could not be split into rows. Read its alignment "
+                   "carefully, and quote the whole row when you cite a "
+                   "value from it.)" if c.has_unstructured_table else "")
+                + f"\n{c.text}"
                 for c in ix.chunks)
             parts.append("## RETRIEVED POLICY TEXT\n" + body)
         else:
