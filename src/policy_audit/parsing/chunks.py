@@ -21,7 +21,8 @@ import re
 from typing import List, Sequence, Tuple
 
 from ..domain.models import Chunk, Table
-from .tables import render_table, split_segments
+from .tables import (looks_like_unstructured_table,
+                     render_table, split_segments)
 
 KV_RE = re.compile(r"\*\*\s*([^*:\n]{1,80}?)\s*:\s*\*\*")
 
@@ -63,7 +64,13 @@ def split_chunks(raw: object, split_key: str | None = None) -> List[str]:
     if raw is None or str(raw).strip() in ("", "[]", "null", "None", "nan"):
         return []
     txt = str(raw).strip()
-    for loader in (json.loads, ast.literal_eval):
+    # Only try the structured loaders if the payload could BE a literal.
+    # ast.literal_eval on a 500KB string that is not one still runs the
+    # Python parser over all of it before failing - about 2.5ms a row,
+    # paid on every row, for nothing.
+    loaders = ((json.loads, ast.literal_eval)
+               if txt[:1] in "[{(\"'" else ())
+    for loader in loaders:
         try:
             value = loader(txt)
         except Exception:
@@ -131,6 +138,8 @@ def parse_chunks(raw: object, split_key: str | None = None) -> List[Chunk]:
                     lines.append(str(payload))
         chunks.append(Chunk(
             index=index,
+            has_unstructured_table=(not tables and
+                                    looks_like_unstructured_table(piece)),
             doc_title=re.sub(r"\*+", "", str(title)).strip()[:120],
             fields=tuple(fields),
             tables=tuple(tables),
