@@ -61,6 +61,7 @@ def _norm(s: str) -> str:
 
 
 def _matches_any(text: str, words: Sequence[str]) -> List[str]:
+    """Only ever called on a column header, so the text is short."""
     low = _norm(text)
     return [w for w in words if w in low]
 
@@ -103,10 +104,14 @@ def build_ontology(chunks: Sequence[Chunk]) -> Ontology:
                 dimensions.append(table.header[0])
                 alternatives = max(alternatives, len(table.rows))
 
-        # prose conditionals: "the approver depends on the amount"
-        for key, value in chunk.fields:
-            if _CONDITIONAL_PROSE.search(value or ""):
-                dimensions.extend(_matches_any(value, _DIMENSION_WORDS))
+        # The prose scan that used to live here is gone. It read every
+        # field looking for "depends on the applicable region" and such,
+        # which cost about three quarters of this function's time and
+        # told us almost nothing a table had not already said: if the
+        # policy varies, it varies in a table, and that is detected
+        # above from structure alone. Prose that mentions a dimension
+        # without tabulating it is usually describing scope, not
+        # branching.
 
     # several documents covering the same section are alternatives for the
     # same obligation, which is the non-table form of the same problem
