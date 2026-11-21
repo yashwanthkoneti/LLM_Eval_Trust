@@ -1,0 +1,129 @@
+# policy-audit configuration.  Edit this file, then run: policy-audit
+#
+# Every Settings field can be set here as PA_<FIELD>.  A value already in
+# the real environment wins over this file, so a one-off override still
+# works without editing it:
+#
+#   PA_LIMIT=20 policy-audit
+#
+# Lists are comma separated.  Booleans accept 1/true/yes/on.
+
+# ---- data ---------------------------------------------------------------
+PA_INPUT_PATH=data/audit_input.csv
+
+# The main deliverable: one row per interaction, the input columns carried
+# through plus the verdict, so it joins straight back to the source.
+PA_OUTPUT_PATH=out/audit_output.csv
+
+# findings.csv (one row per finding) and findings.json (nested, for
+# reading) go here alongside it.  Set PA_WRITE_DETAIL_FILES=false if
+# something downstream only consumes the one CSV.
+PA_OUTPUT_DIR=out
+PA_WRITE_DETAIL_FILES=true
+PA_CHECKPOINT_PATH=out/checkpoint.jsonl
+
+# Input columns copied into the output.  document_chunks is deliberately
+# excluded - it is large and already parsed into the findings, and it
+# would dominate the file.
+PA_CARRY_INPUT_COLUMNS=transaction_id,conversation_id,request_created_on,request,response
+
+# column names in the input; matched case-insensitively
+PA_COL_TRANSACTION_ID=transaction_id
+PA_COL_CONVERSATION_ID=conversation_id
+PA_COL_CREATED_ON=request_created_on
+PA_COL_REQUEST=request
+PA_COL_RESPONSE=response
+PA_COL_CHUNKS=document_chunks
+
+# ---- models -------------------------------------------------------------
+# The screener runs on every row and does the heavy lifting, so it is the
+# small model.  The adjudicator runs only on escalations, so it can be the
+# large one.
+PA_SCREENER_MODEL=gpt-5-mini
+PA_ADJUDICATOR_MODEL=gpt-5
+
+# OPENAI_API_KEY is read by the client library itself, so put it here but
+# note it is deliberately NOT a Settings field - a key has no business in
+# an object that gets printed and serialised.
+OPENAI_API_KEY=sk-...
+# only for a proxy or an Azure-style gateway; leave blank otherwise
+PA_OPENAI_BASE_URL=
+PA_REQUEST_TIMEOUT=120
+# both agents must return a JSON object; where the model supports it this
+# removes most malformed replies at the source
+PA_JSON_MODE=true
+
+# Kept tight on purpose: the client doubles the budget by itself if a
+# reply comes back truncated, which is cheaper than reserving a
+# generous ceiling on every call.  Newer models take
+# max_completion_tokens rather than max_tokens and reject a non-default
+# temperature; the client probes and caches what the model accepts, so
+# swapping models here needs no code change.
+PA_SCREENER_MAX_TOKENS=1200
+PA_ADJUDICATOR_MAX_TOKENS=1400
+PA_TEMPERATURE=0.0
+
+PA_MAX_RETRIES=3
+PA_RETRY_BASE_DELAY=2.0
+# raise above 0 only if you are hitting rate limits
+PA_MIN_SECONDS_BETWEEN_CALLS=0.0
+
+# ---- the live agent's own wording --------------------------------------
+# SET THESE TWO.  If clarify_markers matches nothing, every clarification
+# check is skipped and every askback turn reads as a fresh request.  Run
+# with PA_PREFLIGHT_ONLY=true first and check the counts.
+PA_CLARIFY_MARKERS=please clarify
+PA_STATIC_RESPONSES=I am here to assist with policy related documents,The question could directly determine some outcome
+
+PA_CLARIFY_EXPECTED_QUESTIONS=3
+PA_CLARIFY_EXPECTED_OPTIONS=3
+
+# ---- spans sent to the adjudicator -------------------------------------
+# How much text travels per escalation.  The whole point of pointers is
+# that this stays small; at 480 chars roughly 7% of a typical retrieval
+# reaches the expensive model.
+PA_SPAN_WINDOW_CHARS=480
+PA_MAX_SPANS_PER_CHECK=3
+PA_SPAN_MIN_MATCH=0.55
+
+# Semantic span location, OFF by default. A FALLBACK for when the lexical
+# locator cannot find the screener's pointer, so the embedding bill
+# tracks the failure rate rather than the row count. Turn it on only if
+# you see spans failing to locate.
+#
+# It affects LOCATING only. Grounding - whether a quote is really in the
+# source it cites - stays lexical whatever this is set to, because a
+# quote findable only by meaning is one that was paraphrased, which is
+# exactly what that gate exists to catch.
+PA_SEMANTIC_SPANS=false
+PA_EMBEDDING_MODEL=text-embedding-3-small
+
+# ---- how hard a finding is to earn -------------------------------------
+# strict_grounding drops a confirmed finding whose quote is not in the
+# source it claims.  Set false for ONE calibration run to see how often
+# that is happening, then put it back.
+PA_STRICT_GROUNDING=true
+PA_REQUIRE_READABLE_EVIDENCE=true
+
+# ---- review sample -----------------------------------------------------
+# A defect the audit cannot substantiate is recorded as expected
+# behaviour.  That keeps the queue trustworthy and means misses leave
+# silently, so a slice of the clean rows is reviewed anyway to measure
+# how often.  Stratified by how much doubt the clean verdict carries.
+PA_SAMPLE_RATE=0.10
+# at 10% a stratum of six draws nothing, and the strata carrying most
+# doubt are usually the small ones
+PA_SAMPLE_MIN_PER_STRATUM=2
+# 0 = uncapped.  Set this to stop the largest stratum filling the queue.
+PA_SAMPLE_MAX_PER_STRATUM=0
+
+# ---- run ---------------------------------------------------------------
+PA_BATCH_SIZE=25
+# 0 = every row
+PA_LIMIT=0
+# screen only, do not call the adjudicator - sizes the escalation rate
+PA_DRY_RUN=false
+# parse and report, make no model calls at all
+PA_PREFLIGHT_ONLY=false
+# continue from out/checkpoint.jsonl if it exists
+PA_RESUME=true
